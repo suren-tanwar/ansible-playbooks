@@ -1,0 +1,27 @@
+# Serverless Application Model (SAM) template for a simple AWS Lambda function
+
+# Define the service name
+service: hello-world-lambda
+
+# Specify the AWS provider information
+provider:
+  name: aws
+  runtime: python3.8
+  region: ap-south-1
+
+# Define the AWS Lambda function
+functions:
+  helloWorld:
+    handler: hello_world_lambda.lambda_handler # Specify the Lambda function handler
+    # Define an API Gateway event that triggers the Lambda function
+    events:
+      - http:
+          path: /    # API Gateway path
+          method: ANY  # Accept any HTTP method
+
+
+# npm install -g serverless install serverless
+# serverless deploy to deploy this lamda function
+# serverless remove to remove this lamda function
+
+# https://77yxe00sve.execute-api.ap-south-1.amazonaws.com/dev/

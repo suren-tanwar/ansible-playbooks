@@ -1,0 +1,147 @@
+# Playbook to set up a Linux server with Nginx, configure a self-signed certificate,
+# and apply security best practices
+# install ansible, python,pip,configure aws from local, nginx file  if need
+  # 1.-----------------------• Pick a Linux AMI-----------------
+  name: Create Linux AMI
+  hosts: localhost
+  become: true
+  vars:
+    ami_name: MyCustomLinuxAMI
+    region: ap-south-1
+    instance_id: i-0123456789abcdef0 
+    #  instance_type: t2.micro
+    # source_ami: ami-xxxxxxxxxxxxxxxxx 
+
+  tasks:
+    # - name: Launch EC2 instance
+    #   ec2:
+    #     key_name: "{{ key_name }}"
+    #     instance_type: "{{ instance_type }}"
+    #     image: "{{ source_ami }}"
+    #     wait: true
+    #     region: "{{ region }}"
+    #     instance_tags:
+    #       Name: "{{ ami_name }}"
+    #   register: ec2_instance
+
+    - name: Create AMI
+      ec2_ami:
+        # instance_id: "{{ ec2_instance.instances.id }}" IF WE CREATE AMI FROM ABOVE LAUNCH EC2 INSTACE
+        instance_id: "{{ instance_id }}"
+        name: "{{ ami_name }}"
+        description: "Custom Linux AMI"
+        region: "{{ region }}"
+      register: ami_info
+
+    - name: Print AMI ID
+      debug:
+        var: "AMI ID is {{ami_info.image_id}}"
+
+# 2.      ---------------------------Install and Start Apache webserver
+    - name: Install Apache
+      apt: name=apache2 state=latest # Ensure the latest Apache is installed
+
+    - name: Start Apache service
+      service:
+        name: apache2
+        state: started
+        enabled: true
+
+# 3. ============================ Download code from git
+    - name: Ensure Git is installed
+      package:
+        name: git
+        state: present
+
+    - name: Clone the Git repository
+      git:
+        repo: https://github.com/suren-tanwar/git-ecr.git
+        dest: /playbooks/local
+
+# 5. ======================= Create a self-signed certificate Secure a demo site using self-signed certificate
+    - name: Create a self-signed certificate
+      openssl_certificate:
+        path: /etc/ssl/certs/ansible_fqdn.crt
+        privatekey_path: /etc/ssl/private/ansible_fqdn.key
+        csr_content: "{{ csr.csr }}"
+        provider: selfsigned
+        csr_path: /etc/ansible/ansible_server.csr
+
+#6. ======================= Create a self-signed certificate Secure a demo site using self-signed certificate
+    - name: Secure a demo site using self-signed certificate
+      copy:
+        src: "/path/playbooks/ssl-configured-site.conf"
+        dest: "/etc/nginx/sites-available/"
+      notify: Reload Nginx # Trigger Nginx reload after configuration changes
+
+  handlers:
+   # Handler to reload Nginx service
+    - name: Reload Nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+#4. =========================Configure webserver with security best practices (List them)
+    - name: Install Nginx
+      apt: name=nginx state=latest # Ensure the latest Nginx is installed
+
+    - name: Start Nginx service
+      service:
+        name: nginx
+        state: started
+        enabled: true  # Enable Nginx service to start on boot
+# CONFIGURE NGINX SERVER
+    - name: Copy Nginx configuration file
+      template:
+        src: nginx.conf.j2  # You need to create a Jinja2 template for Nginx configuration
+        dest: /etc/nginx/nginx.conf
+      notify:
+        - Reload Nginx # Trigger Nginx reload after configuration changes
+
+# FIREWALL ACCESS TO SERVER
+    - name: allow all access to tcp port 80
+      firewalld:
+       port: 80/tcp # Enable firewall rule for port 80
+       zone: public
+       state: enabled
+      #  Enable Automatic Updates
+    - name: Install unattended-upgrades
+      apt:
+        name: unattended-upgrades
+        state: latest
+
+# =----SSH SEcuirty config to servers
+    - name: Restrict SSH config file permissions
+      file:
+        path: "/etc/ssh/sshd_config"
+        owner: "root"
+        group: "root"
+        mode: "600"  # Set secure permissions for the SSH configuration file
+    - name: Restrict Nginx config file permissions
+      file:
+        path: "/etc/nginx/nginx.conf"
+        owner: "root"
+        group: "root"
+        mode: "644" # Set secure permissions for the Nginx configuration file
+
+ 
+
+# RUN THIS PLAYBOOK BY
+# ansible-playbook -i playbook.yml
+
+# Secuity practises
+# 1.Firewall Configuration:
+# Use firewalld Ansible modules to configure the firewall.
+
+# 2. SSH Hardening:
+# Customize the SSH configuration to enhance security. Disable root login, use key-based authentication, and limit access to specific users.
+# Implement security measures like changing the default SSH port.
+
+# 3.Nginx Configuration:
+# Configure Nginx to use HTTPS instead of HTTP to encrypt data in transit. Use a valid SSL/TLS certificate.
+
+# 4.Regular Updates:
+# Ensure that the system is regularly updated with security patches. Include a task to run the package manager to update installed packages.
+
+# 5.File Permissions:
+# Use the file and template Ansible modules to manage file permissions.

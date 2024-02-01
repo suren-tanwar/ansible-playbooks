@@ -1,0 +1,151 @@
+---
+- name: Deploy Application
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ami_name: "first-AMI"
+    launch_config_name: "MyLaunchConfig"
+    elb_name: "ELB-1"
+    region: "ap-south-1"
+    target_group_name_1: "MyTargetGroup1"
+    target_group_name_2: "MyTargetGroup2"
+    domain_1: "example1.com"
+    domain_2: "example2.com"
+
+  tasks:
+   # Create AMI
+    - name: Create AMI
+      ec2_ami:
+        name: "{{ ami_name }}"
+        instance_id: "67326284274248864"
+        wait: yes
+        region: "{{ region }}"
+      register: ami_result
+ # Create Launch Configuration
+    - name: Create Launch Configuration
+      ec2_lc:
+        name: "{{ launch_config_name }}"
+        image_id: "{{ ami_result.image_id }}"
+        instance_type: "t2.micro"
+        security_groups: ["Sg-1"]
+        region: "{{ region }}"
+      register: lc_result
+# Launch ASG (Auto Scaling Group)
+    - name: Launch ASG
+      ec2_asg:
+        name: Asg-1
+        launch_config_name: "{{ lc_result.name }}"
+        min_size: 2
+        max_size: 4
+        desired_capacity: 2
+        health_check_type: "EC2"
+        health_check_grace_period: 300
+        tags:
+          - key: "Name"
+            propagate_at_launch: true
+      register: asg_result
+    # Attach ELB to ASG (Elastic Load Balancer)
+    - name: Attach ELB to ASG
+      ec2_elb:
+        name: "{{ elb_name }}"
+        state: present
+        listeners:
+          - protocol: http
+            load_balancer_port: 80
+            instance_port: 80
+        instances:
+          - "{{ item.instance_id }}"
+        region: "{{ region }}"
+      with_items: "{{ asg_result.instances }}"
+   # Create Target Groups
+    - name: Create Target Group 1
+      ec2_target_group:
+        name: "{{ target_group_name_1 }}"
+        port: 80
+        protocol: HTTP
+        region: "{{ region }}"
+        state: present
+        register: target_group1_result
+
+    - name: Create Target Group 2
+      ec2_target_group:
+        name: "{{ target_group_name_2 }}"
+        port: 80
+        protocol: HTTP
+        region: "{{ region }}"
+        state: present
+        register: target_group2_result
+   # Register instances to Target Groups
+    - name: Register instances to Target Groups
+      ec2_instance:
+        instance_ids: "{{ item.instance_id }}"
+        region: "{{ region }}"
+        target_groups:
+          - "{{ target_group_name_1 }}"
+          - "{{ target_group_name_2 }}"
+      with_items: "{{ asg_result.instances }}"
+ # Create ALB Listener Rules for Domains
+    - name: Create ALB Listener Rule for Domain 1
+      ec2_alb_listener_rule:
+        listener_arn: "{{ elb_name | regex_replace('elb', 'app') }}-80"
+        conditions:
+          - field: host-header
+            values:
+              - "{{ domain_1 }}"
+        priority: 1
+        actions:
+          - type: forward
+            target_group_arn: "{{ target_group_name_1 }}"
+
+    - name: Create ALB Listener Rule for Domain 2
+      ec2_alb_listener_rule:
+        listener_arn: "{{ elb_name | regex_replace('elb', 'app') }}-80"
+        conditions:
+          - field: host-header
+            values:
+              - "{{ domain_2 }}"
+        priority: 2
+        actions:
+          - type: forward
+            target_group_arn: "{{ target_group_name_2 }}"
+   # Create IAM Role
+    - name: Create IAM Role
+      iam_role:
+        name: "IAMRole"
+        assume_role_policy_document: |
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": "ec2.amazonaws.com"
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+      register: iam_role_result
+
+    # - name: Attach IAM Policy to Role
+    #   iam_policy:
+    #     name: "S3AccessPolicy"
+    #     policy_document: |
+    #       {
+    #         "Version": "2012-10-17",
+    #         "Statement": [
+    #           {
+    #             "Effect": "Allow",
+    #             "Action": [
+    #               "s3:GetObject"
+    #             ],
+    #             "Resource": [
+    #               "arn:aws:s3:::dhdh/*"
+    #             ]
+    #           }
+    #         ]
+    #       }
+    #     state: present
+    #     role: "{{ iam_role_result.role.name }}"
+
+# // packer build packer.json run this
